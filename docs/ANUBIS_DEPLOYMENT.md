@@ -49,7 +49,7 @@ plan says `noop` for D1, KV, R2, and Access before accepting it. Dashboard
 changes to the Access app should be reviewed after redeployment.
 
 ```bash
-npx wrangler d1 export open-seo-db-selfhost --remote --output /PRIVATE/BACKUP/open-seo-db-selfhost.sql
+npx wrangler d1 export deac1d57-a728-49e8-a7ed-b6f04f3089a0 --remote --output /PRIVATE/BACKUP/open-seo-db-selfhost.sql
 cp -R .alchemy/state /PRIVATE/BACKUP/alchemy-state
 ```
 
@@ -60,6 +60,8 @@ currently empty; after object artifacts exist, include a scoped R2/S3 object
 sync in the backup routine. Research-bearing D1 records should be restored
 only after taking a fresh export of the current database and inspecting the
 target, because importing an older SQL dump can overwrite later research.
+The `open-seo-db-selfhost-after-mcp.sql` export in that folder includes the
+five projects and the saved keyword test record.
 
 For a code rollback, check out the last known working commit, rebuild, and
 redeploy using the existing `.alchemy/state` and `selfhost` stage. Leave D1,
@@ -75,6 +77,36 @@ the `openseo-anubis` MCP registration rather than the official plugin's
 hosted `app.openseo.so` endpoint. The twelve public SEO skills were copied
 from `plugins/openseo/skills` to `~/.codex/skills`.
 
+On 2026-10-22, Managed OAuth was enabled for `open-seo selfhost`, with
+localhost and 127.0.0.1 loopback client redirects allowed. The Access policy
+still permits only `iamghostmentor@gmail.com`. The grant lasts for the app
+session (24 hours); access tokens use Cloudflare's default 15-minute lifetime.
+Codex is registered and authorized with:
+
+```bash
+codex mcp get openseo-anubis
+codex mcp login openseo-anubis
+```
+
+The global Codex CLI was updated to 0.163.0 because version 0.137.0 could not
+parse the current model catalog. With 0.163.0, fresh Codex sessions discovered
+and called `list_projects`, `get_project_context`, `save_keywords`, and
+`list_saved_keywords` on the self-hosted endpoint. A Taylor Nursing Academy
+keyword idea, `cna classes kansas city`, is tagged `unverified-idea`; it has no
+search metrics and incurred no DataForSEO cost. A separate fresh Codex session
+read it back. Cloudflare Access login and the MCP OAuth consent are distinct;
+if a client loses access after a grant expires, run `codex mcp login
+openseo-anubis` again.
+
+Claude Code can register the same endpoint with `claude mcp add --transport
+http openseo-anubis https://oseo.anubistechholdings.com/mcp`, then use `/mcp`
+to complete OAuth. This path is documented but was not tested here. For a
+ChatGPT workspace that supports custom MCP servers, use Plugins → Add custom
+MCP server, enter the same HTTPS endpoint, select OAuth, complete Access login,
+and review discovered tools. ChatGPT availability and write permissions depend
+on the workspace plan and administrator settings; that connection was not
+created or tested here. Neither client should use OpenSEO's hosted SaaS URL.
+
 The deployment has no scheduled paid research and does not offer
 JavaScript-rendered audits. Creating a project with a Domain in the UI starts
 a 50-page scan, so initial site URLs are recorded in project context instead.
@@ -88,7 +120,7 @@ source, request parameters, and returned cost in the project's research log.
 Free verification commands:
 
 ```bash
-npx wrangler d1 execute open-seo-db-selfhost --remote --command \
+npx wrangler d1 execute deac1d57-a728-49e8-a7ed-b6f04f3089a0 --remote --command \
   'SELECT COUNT(*) FROM projects;'
 curl -I https://oseo.anubistechholdings.com/
 codex mcp get openseo-anubis
