@@ -1,4 +1,5 @@
 import * as Alchemy from "alchemy";
+import { localState } from "alchemy/State";
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as CfWorkers from "@distilled.cloud/cloudflare/workers";
 import * as ZeroTrust from "@distilled.cloud/cloudflare/zero-trust";
@@ -178,6 +179,7 @@ const resolveSelfHostAccess = (
   stage: string,
   provision: boolean,
   workersSubdomain: string,
+  selfHostDomain: string,
 ) =>
   Effect.gen(function* () {
     let teamDomain = yield* optionalVar("TEAM_DOMAIN");
@@ -252,7 +254,7 @@ const resolveSelfHostAccess = (
         applicationId: "SelfHostAccess",
         policyName: `open-seo ${stage} self-host users`,
         applicationName: `open-seo ${stage}`,
-        domain: `${workerName(stage)}.${subdomain}`,
+        domain: selfHostDomain || `${workerName(stage)}.${subdomain}`,
         emails: allowedEmails,
       });
       policyAud = application.aud;
@@ -307,10 +309,10 @@ export default Alchemy.Stack(
   "open-seo",
   {
     providers: Cloudflare.providers(),
-    // Durable state in the Cloudflare state store (an `alchemy-state-store`
-    // Worker on this account; one-time `pnpm alchemy cloudflare bootstrap`).
-    // CI fetches its auth token from the account Secrets Store each run.
-    state: Cloudflare.state(),
+    // Cloudflare Secrets Store currently returns internal_error during the
+    // state-store bootstrap on this account. Keep the deployment state on disk
+    // and back up .alchemy/state before upgrades or moving machines.
+    state: localState(),
   },
   Effect.gen(function* () {
     const stage = yield* Alchemy.Stage;
@@ -323,6 +325,7 @@ export default Alchemy.Stack(
     );
     const databaseProvider = yield* optionalVar("DATABASE_PROVIDER");
     const workersSubdomain = yield* readWorkersSubdomain({ required: false });
+    const selfHostDomain = yield* optionalVar("SELFHOST_DOMAIN");
 
     // Auth needs an absolute BETTER_AUTH_URL. Prod sets it explicitly;
     // previews always derive it from the deterministic worker name — a wrong
@@ -346,6 +349,8 @@ export default Alchemy.Stack(
           ),
         );
       }
+    } else if (selfHostDomain) {
+      authUrl = `https://${selfHostDomain}`;
     } else if (workersSubdomain) {
       authUrl = `https://${workerName(stage)}.${workersSubdomain}`;
     } else if (authMode === "hosted") {
@@ -364,6 +369,7 @@ export default Alchemy.Stack(
       stage,
       authMode === "cloudflare_access" && !prod,
       workersSubdomain,
+      selfHostDomain,
     );
 
     // Created once and bound into BOTH workers — they share the same
@@ -435,7 +441,14 @@ export default Alchemy.Stack(
     const app = yield* Cloudflare.Worker("open-seo", {
       name: workerName(stage),
       // Prod serves the real domains; the zone is inferred from the hostname.
-      domain: prod ? ["app.openseo.so", "www.app.openseo.so"] : undefined,
+      domain: prod
+        ? ["app.openseo.so", "www.app.openseo.so"]
+        : selfHostDomain
+          ? [selfHostDomain]
+          : undefined,
+      // Keep the stage's workers.dev hostname unavailable when a custom
+      // domain is used, so the Access gate covers every public route.
+      url: selfHostDomain ? false : undefined,
       // Prebuilt worker from `vite build` (@cloudflare/vite-plugin). The entry
       // exports the DO + WorkflowEntrypoint classes (re-exported by
       // src/server.ts), which `bundle: false` requires. Sibling chunks under
@@ -472,7 +485,8 @@ export default Alchemy.Stack(
           ? { mode: "smart" }
           : undefined,
       // Scheduled rank checks — src/server.ts `scheduled` handler.
-      crons: wrangler.triggers.crons,
+      // Paid research collection stays off until its API costs are reviewed.
+      crons: authMode === "cloudflare_access" ? [] : wrangler.triggers.crons,
       env: {
         ...resources,
         ...dataEnv,
@@ -481,7 +495,8 @@ export default Alchemy.Stack(
         BETTER_AUTH_URL: authUrl,
         // The audit worker above always binds BROWSER; the app worker checks
         // this before it offers "Render JavaScript".
-        AUDIT_BROWSER_RENDERING: "true",
+        AUDIT_BROWSER_RENDERING:
+          authMode === "cloudflare_access" ? "false" : "true",
         TEAM_DOMAIN: access.teamDomain,
         POLICY_AUD: access.policyAud,
 
